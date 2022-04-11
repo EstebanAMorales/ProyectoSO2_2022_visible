@@ -65,7 +65,7 @@ unsigned  long get_amount_left_to_process(unsigned long total_data_size, unsigne
  * @param socket_fd
  * @return
  */
-int send_data(char* data_buffer, int socket_fd){
+unsigned long send_data(char* data_buffer, int socket_fd){
     unsigned long total_data_size = strlen(data_buffer);
     if (total_data_size == 0){
         return -1;
@@ -86,15 +86,16 @@ int send_data(char* data_buffer, int socket_fd){
         first_write_payload_size = IO_BUFFER_SIZE - 4;
     }
     strncpy(first_write_payload, data_buffer, first_write_payload_size);//WARNING actual_paylaod may be not NULL-terminated.
-
-
+    //printf("send --%s--\n",data_buffer);
+    /*
     printf("FIRST WRITE: 0x%X,0x%X,0x%X,0x%X::%.*s\n", //WARNING %.*s
            send_buf[0], send_buf[1], send_buf[2], send_buf[3], first_write_payload_size, &send_buf[4]);
+    */
     //send header + payload
     bytes_written = write(socket_fd, send_buf, first_write_payload_size+4);
     total_bytes_sent+=bytes_written;
     if(bytes_written > 0){
-        printf("First write return:%i\n",bytes_written);
+        //printf("First write return:%i\n",bytes_written);
     } else {
         printf("First write failed. Error: %s\n",strerror(errno));
         return -1;
@@ -111,7 +112,7 @@ int send_data(char* data_buffer, int socket_fd){
         total_bytes_sent+=bytes_written;
 
     }
-    printf("END OF WRITE\n");
+    //printf("END OF WRITE\n");
     return total_bytes_sent;
 }
 
@@ -160,7 +161,7 @@ int recv_data_single_read(char** char_buffer, int socket_fd){
     }
 }
 
-int recv_data(char** data_buffer, int socket_fd){
+unsigned long recv_data(char** data_buffer, int socket_fd){
     int total_payload_size;
     unsigned long total_read_bytes_count=0;
     char input_buf[IO_BUFFER_SIZE+1];//sizeof only works ok for static arrays. +1 for null-termination
@@ -169,8 +170,8 @@ int recv_data(char** data_buffer, int socket_fd){
     int bytes_recv = 0;
     //read first chunk of data the first 4 bytes contain the total size of the data to be received.
     bytes_recv = recv(socket_fd, input_buf, IO_BUFFER_SIZE,0);
-    printf("BYTES READ: %i\n", bytes_recv);
-    printf("INPUT BUF: 0x%X,0x%X,0x%X,0x%X. EXTRA 0x%X.\n",input_buf[0],input_buf[1],input_buf[2],input_buf[3],input_buf[4]);
+    //printf("BYTES READ: %i\n", bytes_recv);
+    //printf("INPUT BUF: 0x%X,0x%X,0x%X,0x%X. EXTRA 0x%X.\n",input_buf[0],input_buf[1],input_buf[2],input_buf[3],input_buf[4]);
     if(bytes_recv > 4){//makes sure that we have received at least the 4 bytes SIZE HEADER
         total_payload_size = get_payload_size(input_buf);
         total_read_bytes_count=bytes_recv;
@@ -184,9 +185,14 @@ int recv_data(char** data_buffer, int socket_fd){
     memset(*data_buffer, 0, total_payload_size+1);
     char* first_read_tail = &input_buf[4];
 
-    printf("tail:%s--size: %lu\n",first_read_tail, strlen(first_read_tail));
-    strcpy(*data_buffer, first_read_tail);
-    printf("HOLO3\n");
+    //printf("tail:%s--size: %lu\n",first_read_tail, strlen(first_read_tail));
+    if (total_payload_size<(IO_BUFFER_SIZE-4)){
+        strncpy(*data_buffer, first_read_tail,total_payload_size);
+    } else {
+        strcpy(*data_buffer, first_read_tail);
+    }
+
+    //printf("HOLO3\n");
 
     while (total_read_bytes_count < total_payload_size + 4){//+4 because size header bytes
         unsigned long bytes_to_read;
@@ -198,8 +204,9 @@ int recv_data(char** data_buffer, int socket_fd){
         }
         strcat(*data_buffer, input_buf);//WARNING may produce NOT null-terminated string
         total_read_bytes_count+=bytes_recv;
+        memset(input_buf,0,IO_BUFFER_SIZE+1);
 
     }
-    printf("Received data: %s\n",*data_buffer);
+    //printf("READ size:%lu data: --%s--\n",strlen(*data_buffer),*data_buffer);
     return total_read_bytes_count;
 }

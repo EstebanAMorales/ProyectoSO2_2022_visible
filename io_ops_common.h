@@ -7,8 +7,8 @@
 #define IO_BUFFER_SIZE 10
 
 int send_data_single_write(char* data_buffer, int socket_fd);
-int send_data(char* data_buffer, int socket_fd);
+unsigned long send_data(char* data_buffer, int socket_fd);
 int recv_data_single_read(char** char_buffer, int socket_fd);
-int recv_data(char** data_buffer, int socket_fd);
+unsigned long recv_data(char** data_buffer, int socket_fd);
 
 #endif //SO2_2022_TP2_IO_OPS_COMMON_H
