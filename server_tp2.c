@@ -330,7 +330,7 @@ void* tcp4_handle_new_connections(void *non) {
         pthread_t t;
         int* pclient = malloc(sizeof(int));
         *pclient = tcp4_client_socket_fd;
-        pthread_create(&t, &create_detached_attr, read_file_from_tcp4_client, pclient);
+        pthread_create(&t, &create_detached_attr, execute_sql_query_from_tcp4_client, pclient);
     }
     printf("Done TCP4 listening...\n");
     return NULL;
@@ -403,28 +403,18 @@ int check(int exp, const char *msg){
  * Handler function for the threads created when a IPv4 TCP connection is accepted.
  * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
  */
-void* read_file_from_tcp4_client(void* client_socket){
+void* execute_sql_query_from_tcp4_client(void* client_socket){
     int client_fd = *((int*)client_socket);
     free(client_socket);
-    char input_buffer[BUFFER_SIZE];
-    long read_bytes = 0L;
-    printf("Starting to receive the file contents...\n");
-    while(keep_running){
-        bzero(input_buffer,BUFFER_SIZE);
-        int current_read = recv(client_fd, input_buffer, BUFFER_SIZE,0);
-        if( current_read <= 0){
-            printf("Failure to read %i bytes on file transfer. Recv result: %i\n",BUFFER_SIZE,current_read);
-            perror("Error _recv:");
-            break;
-        }
-        read_bytes += current_read;
-        //log_debug("%i bytes SAVED ON FILE.",saved_bytes);
-        pthread_mutex_lock(&tcp4_mutex);
-        tcp4_byte_count += current_read;
-        pthread_mutex_unlock(&tcp4_mutex);
+    while (keep_running){
+        char* client_query;
+        recv_data(&client_query,client_fd);
+        printf("QUERY: %s\n",client_query);
+        sleep(1);
+        send_data("RESULTADO QUERY!!;",client_fd);
     }
-    printf("Total of %ld bytes READ.\n ",read_bytes);
-    printf("Successful file transfer.\n");
+
+    printf("Constant query Thread finished execution.\n");
     close(client_fd);
     return NULL;
 }

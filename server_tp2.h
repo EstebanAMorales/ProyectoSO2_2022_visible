@@ -16,7 +16,7 @@
 #define MEGA 1000000L
 
 
-void* read_file_from_tcp4_client(void* client_socket);
+void* execute_sql_query_from_tcp4_client(void* client_socket);
 void* read_file_from_tcp6_client(void* client_socket);
 void* read_file_from_unix_client(void* client_socket);
 void* measure_band_width_usage(void* non);

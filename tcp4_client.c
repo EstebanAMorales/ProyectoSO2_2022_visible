@@ -8,8 +8,10 @@
 #include <signal.h>
 
 #include "clients_common.h"
+#include "io_ops_common.h"
 
 #define SA struct sockaddr
+#define LOOPING_QUERY "SELECT ALL!"
 //#define PORT 7799
 //#define INPUT_FILE_PATH "../fake180mbfile.fake"
 
@@ -27,8 +29,13 @@ int main(int argc, const char **argv){
     tcp4_init_client();
     tcp4_connect_to_server("");
     while (keep_client_running){
+        char* query_response;
         usleep(lag_between_sends_ms * 1000L);
-        send_file_over_socket(input_file_path, tcp4_client_sock_fd);
+        //send_file_over_socket(input_file_path, tcp4_client_sock_fd);
+        send_data(LOOPING_QUERY,tcp4_client_sock_fd);
+        recv_data(&query_response,tcp4_client_sock_fd);
+        printf("QUERY RESULT: %s",query_response);
+
     }
     printf("Closed by User.\n");
     close(tcp4_client_sock_fd);

@@ -12,7 +12,7 @@ find_package(SQLite3 REQUIRED)
 set(CMAKE_CXX_CPPCHECK "cppcheck")
 
 add_executable(server_tp2 server_tp2.c io_ops_common.c)
-add_executable(tcp4_client tcp4_client.c clients_common.c clients_common.h)
+add_executable(tcp4_client tcp4_client.c clients_common.c io_ops_common.c)
 add_executable(tcp6_client tcp6_client.c clients_common.c clients_common.h)
 add_executable(unix_client unix_client.c clients_common.c clients_common.h)
 add_executable(test_client test_client.c io_ops_common.c)

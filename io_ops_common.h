@@ -4,7 +4,7 @@
 
 #ifndef SO2_2022_TP2_IO_OPS_COMMON_H
 #define SO2_2022_TP2_IO_OPS_COMMON_H
-#define IO_BUFFER_SIZE 10
+#define IO_BUFFER_SIZE 1000
 
 int send_data_single_write(char* data_buffer, int socket_fd);
 unsigned long send_data(char* data_buffer, int socket_fd);
