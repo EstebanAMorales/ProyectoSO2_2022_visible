@@ -11,6 +11,7 @@
 #include <sys/select.h>
 
 #include "server_tp2.h"
+#include "io_ops_common.h"
 
 int tpc4_server_port;
 int tcp6_server_port;
