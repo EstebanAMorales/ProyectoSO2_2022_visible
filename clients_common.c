@@ -73,25 +73,6 @@ int send_file_over_socket(char* file_name, int socket_fd){
     return 0;
 }
 
-int set_socket_timeouts(int socket_fd, int seconds){
-    struct timeval timeout;
-    timeout.tv_sec = seconds;
-    timeout.tv_usec = 0;
-
-    if (setsockopt (socket_fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0){
-        printf("setsockopt failed\n");
-        perror("sockopt recv: ");
-        return 1;
-    }
-
-    if (setsockopt (socket_fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0){
-        printf("setsockopt failed\n");
-        perror("sockopt send: ");
-        return 2;
-    }
-    return 0;
-}
-
 void process_lag_argument(const char **arguments) {
     const char* lag_string_arg = arguments[3];
     printf("ARG3:%s\n",lag_string_arg);

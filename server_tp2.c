@@ -9,10 +9,15 @@
 #include <string.h>
 #include <sys/un.h>
 #include <sys/select.h>
+#include <sqlite3.h>
 
 #include "server_tp2.h"
 #include "io_ops_common.h"
 
+#define MAX_QUERY_RESULTS 1000
+#define TCP4_SOCKET_TIMEOUT 3
+#define TCP6_SOCKET_TIMEOUT 3
+#define UNIX_SOCKET_TIMEOUT 3
 int tpc4_server_port;
 int tcp6_server_port;
 char* unix_socket_path;
@@ -28,7 +33,7 @@ pthread_attr_t create_detached_attr;
 
 FILE *bw_usage_log_file;
 //TCPv4 setup variables
-int tcp4_server_socket_fd, addr_size;
+int tcp4_listener_socket_fd, addr_size;
 struct sockaddr_in tcp4_server_addr_in, tcp4_client_addr_in;
 //TCPv6 setup variables
 int tcp6_listener_socket_fd = -1;
@@ -38,15 +43,20 @@ char str_addr[INET6_ADDRSTRLEN];
 //Connected UNIX setup variables
 int unix_listener_socket_fd = 0;
 struct sockaddr_un unix_client_addr;
+//------------TP2------------------;
 
+sqlite3* sqlite_connections[5];
+pthread_mutex_t queue_counters_mutex, conn1_mutex,conn2_mutex,conn3_mutex,conn4_mutex,conn5_mutex;
+int connections_queue_sizes[5];
 int main(int argc, const char **argv) {
 
     process_exec_arguments(argc,argv);
-    setup_log_file();
-    setup_ctrlc_signal_catcher();
+    //setup_log_file();
+    setup_exit_signal_catcher();
     setup_tcp4_socket();
     setup_tcp6_socket();
     setup_unix_socket();
+    setup_sqlite();
 
     pthread_mutex_init(&tcp4_mutex,NULL);
     pthread_mutex_init(&tcp6_mutex,NULL);
@@ -55,7 +65,7 @@ int main(int argc, const char **argv) {
     pthread_attr_init(&create_detached_attr);
     pthread_attr_setdetachstate(&create_detached_attr, PTHREAD_CREATE_DETACHED);
 
-    init_bandwidth_monitor();
+    //init_bandwidth_monitor();
     init_connections_listeners();
 
     while (keep_running){
@@ -66,8 +76,46 @@ int main(int argc, const char **argv) {
     pthread_mutex_destroy(&tcp6_mutex);
     pthread_mutex_destroy(&tcp4_mutex);
     pthread_mutex_destroy(&unixconn_mutex);
-    fclose(bw_usage_log_file);
+    close(unix_listener_socket_fd);
+    close(tcp4_listener_socket_fd);
+    close(tcp6_listener_socket_fd);
+    //fclose(bw_usage_log_file);
     return 0;
+}
+
+server_result setup_sqlite(){
+
+    for (int i = 0; i < 5; ++i) {
+        int sqlite_open_result = sqlite3_open("so2_2022_tp2.db", &sqlite_connections[i]);
+        if (sqlite_open_result != SQLITE_OK) {
+            fprintf(stderr, "Cannot open database: %s\n",
+                    sqlite3_errmsg(sqlite_connections[i]));
+            sqlite3_close(sqlite_connections[i]);
+            return SRV_SETUP_SQL_ERR;
+        }
+    }
+    char *err_msg = 0;
+    char *sql_stmt = "DROP TABLE IF EXISTS Cars;"
+                "CREATE TABLE Cars(Id INT, Name TEXT, Price INT);"
+                "INSERT INTO Cars VALUES(1, 'Audi', 52642);"
+                "INSERT INTO Cars VALUES(2, 'Mercedes', 57127);"
+                "INSERT INTO Cars VALUES(3, 'Skoda', 9000);"
+                "INSERT INTO Cars VALUES(4, 'Volvo', 29000);"
+                "INSERT INTO Cars VALUES(5, 'Bentley', 350000);"
+                "INSERT INTO Cars VALUES(6, 'Citroen', 21000);"
+                "INSERT INTO Cars VALUES(7, 'Hummer', 41400);"
+                "INSERT INTO Cars VALUES(8, 'Volkswagen', 21600);";
+
+    int sql_exec_result = sqlite3_exec(sqlite_connections[0], sql_stmt, 0, 0, &err_msg);
+
+    if (sql_exec_result != SQLITE_OK ) {
+        fprintf(stderr, "SQL error: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        sqlite3_close(sqlite_connections[0]);
+        return SRV_SETUP_SQL_ERR;
+    }
+
+    return SRV_OK;
 }
 
 void process_exec_arguments(int arguments_count, const char **arguments) {
@@ -141,7 +189,7 @@ void* unix_handle_new_connections(void* non){
             perror("Error: ");
             return NULL;
         }
-        set_socket_timeouts(unix_client_fd, 1);
+        set_socket_timeouts(unix_client_fd, UNIX_SOCKET_TIMEOUT);
         pthread_t unix_conn_handler_thread;
         int* pclient = malloc(sizeof(int));
         *pclient = unix_client_fd;
@@ -229,7 +277,7 @@ void* tcp6_handle_new_connections(void* non){
             close(tcp6_listener_socket_fd);
             return NULL;
         }
-        set_socket_timeouts(tcp6_client_socket_fd, 1);
+        set_socket_timeouts(tcp6_client_socket_fd, TCP6_SOCKET_TIMEOUT);
         inet_ntop(AF_INET6, &(tcp6_client_addr.sin6_addr),
                   str_addr, sizeof(str_addr));
         printf("New connection from: %s:%d ...\n",
@@ -290,23 +338,6 @@ int setup_tcp6_socket() {
     return 0;
 
 }
-int set_socket_timeouts(int client_fd, int seconds){
-    struct timeval timeout;
-    timeout.tv_sec = seconds;
-    timeout.tv_usec = 0;
-
-    if (setsockopt (client_fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0){
-        printf("setsockopt failed\n");
-        return 1;
-    }
-
-    if (setsockopt (client_fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0){
-        printf("setsockopt failed\n");
-        return 2;
-    }
-    return 0;
-}
-
 /*
  * Handle incoming connections to the IPv4 TCP listener.
  * For each new connection creates a new detached thread.
@@ -317,7 +348,7 @@ void* tcp4_handle_new_connections(void *non) {
         printf("Waiting for TCP4 connections...\n");
         int tcp4_client_socket_fd;
         addr_size=sizeof(struct sockaddr_in);
-        tcp4_client_socket_fd=accept(tcp4_server_socket_fd, (struct sockaddr*)&tcp4_client_addr_in, (socklen_t*)&addr_size);
+        tcp4_client_socket_fd=accept(tcp4_listener_socket_fd, (struct sockaddr*)&tcp4_client_addr_in, (socklen_t*)&addr_size);
         if (tcp4_client_socket_fd == -1 && keep_running == 1){
             printf("Failed to accept connection. Will keep trying ...");
             break;
@@ -326,7 +357,7 @@ void* tcp4_handle_new_connections(void *non) {
             break;
         }
         printf("Connected\n");
-        set_socket_timeouts(tcp4_client_socket_fd, 1);
+        set_socket_timeouts(tcp4_client_socket_fd, TCP4_SOCKET_TIMEOUT);
         pthread_t t;
         int* pclient = malloc(sizeof(int));
         *pclient = tcp4_client_socket_fd;
@@ -341,7 +372,7 @@ void* tcp4_handle_new_connections(void *non) {
 void setup_tcp4_socket() {
 
 
-    check(tcp4_server_socket_fd=socket(AF_INET, SOCK_STREAM, 0),
+    check(tcp4_listener_socket_fd=socket(AF_INET, SOCK_STREAM, 0),
           "Failed to create socket");
     //init all addresses
     bzero((char *)&tcp4_server_addr_in, sizeof(tcp4_server_addr_in));
@@ -350,18 +381,18 @@ void setup_tcp4_socket() {
     tcp4_server_addr_in.sin_port=htons(tpc4_server_port);
 
     int opt_val = 1;
-    setsockopt(tcp4_server_socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof opt_val);
+    setsockopt(tcp4_listener_socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof opt_val);
 
-    check(bind(tcp4_server_socket_fd, (struct sockaddr*)&tcp4_server_addr_in, sizeof(tcp4_server_addr_in)),
+    check(bind(tcp4_listener_socket_fd, (struct sockaddr*)&tcp4_server_addr_in, sizeof(tcp4_server_addr_in)),
           "Failed when trying to bind socket to address");
-    check(listen(tcp4_server_socket_fd, TCP4_CONNECTIONS_QUEUE_SIZE),
+    check(listen(tcp4_listener_socket_fd, TCP4_CONNECTIONS_QUEUE_SIZE),
           "Failed when trying to listen for connections");
 }
 /*
  * Configures a handler function that will be executed when the user
  * terminates the program by typing Ctrl+C on the terminal.
  */
-void setup_ctrlc_signal_catcher() {
+void setup_exit_signal_catcher() {
     struct sigaction act;
     act.sa_handler = sig_handler;
     sigemptyset(&act.sa_mask);
@@ -399,6 +430,23 @@ int check(int exp, const char *msg){
     }
     return exp;
 }
+int callback(void *all_rows, int argc, char **argv, char **azColName) {
+    char row[500];
+    memset(row,0,500);
+    row[0]='|';
+    row[1]=' ';
+    char* row_marker = &row[2];
+
+    for (int i = 0; i < argc; i++) {
+        sprintf(row_marker,"%s = %s | ",azColName[i], argv[i] ? argv[i] : "NULL");
+        row_marker= row + strlen(row);
+    }
+
+    *row_marker = '\n';
+    strcat(all_rows,row);
+    return 0;
+}
+
 /*
  * Handler function for the threads created when a IPv4 TCP connection is accepted.
  * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
@@ -406,12 +454,24 @@ int check(int exp, const char *msg){
 void* execute_sql_query_from_tcp4_client(void* client_socket){
     int client_fd = *((int*)client_socket);
     free(client_socket);
+    char query_result[MAX_QUERY_RESULTS];
+    memset(query_result, 0, MAX_QUERY_RESULTS);
+
+    char *err_msg;
     while (keep_running){
         char* client_query;
         recv_data(&client_query,client_fd);
         printf("QUERY: %s\n",client_query);
-        sleep(1);
-        send_data("RESULTADO QUERY!!;",client_fd);
+        int rc;
+        rc = sqlite3_exec(sqlite_connections[0], client_query, callback, &query_result, &err_msg);
+        if (rc != SQLITE_OK ) {
+            sprintf(query_result, "SQL error: %s\n", err_msg);
+            sqlite3_free(err_msg);
+        }
+        //free(client_query);
+        send_data(query_result,client_fd);
+        //free response
+        memset(query_result, 0, MAX_QUERY_RESULTS);
     }
 
     printf("Constant query Thread finished execution.\n");

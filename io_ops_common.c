@@ -210,3 +210,22 @@ unsigned long recv_data(char** data_buffer, int socket_fd){
     //printf("READ size:%lu data: --%s--\n",strlen(*data_buffer),*data_buffer);
     return total_read_bytes_count;
 }
+
+int set_socket_timeouts(int socket_fd, int seconds){
+    struct timeval timeout;
+    timeout.tv_sec = seconds;
+    timeout.tv_usec = 0;
+
+    if (setsockopt (socket_fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0){
+        printf("setsockopt failed\n");
+        perror("sockopt recv: ");
+        return 1;
+    }
+
+    if (setsockopt (socket_fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0){
+        printf("setsockopt failed\n");
+        perror("sockopt send: ");
+        return 2;
+    }
+    return 0;
+}

@@ -18,4 +18,4 @@ add_executable(unix_client unix_client.c clients_common.c clients_common.h)
 add_executable(test_client test_client.c io_ops_common.c)
 add_executable(test_server test_server.c io_ops_common.c)
 
-target_link_libraries(server_tp2 PRIVATE Threads::Threads)
+target_link_libraries(server_tp2 PRIVATE Threads::Threads SQLite::SQLite3)

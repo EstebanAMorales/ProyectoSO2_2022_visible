@@ -15,6 +15,11 @@
 //#define UNIX_SOCKET_PATH "./so2_2022_tp1.socket"
 #define MEGA 1000000L
 
+typedef enum{
+    SRV_OK = 0,
+    SRV_SETUP_SQL_ERR = -1,
+    socket_unknown = -2,
+}server_result;
 
 void* execute_sql_query_from_tcp4_client(void* client_socket);
 void* read_file_from_tcp6_client(void* client_socket);
@@ -25,9 +30,11 @@ void init_bandwidth_monitor();
 
 void setup_log_file();
 
-void setup_ctrlc_signal_catcher();
+void setup_exit_signal_catcher();
 
 void setup_tcp4_socket();
+
+server_result setup_sqlite();
 
 void* tcp4_handle_new_connections(void* non);
 

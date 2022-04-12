@@ -11,7 +11,7 @@
 #include "io_ops_common.h"
 
 #define SA struct sockaddr
-#define LOOPING_QUERY "SELECT ALL!"
+#define LOOPING_QUERY "SELECT * FROM Cars"
 //#define PORT 7799
 //#define INPUT_FILE_PATH "../fake180mbfile.fake"
 
@@ -34,7 +34,7 @@ int main(int argc, const char **argv){
         //send_file_over_socket(input_file_path, tcp4_client_sock_fd);
         send_data(LOOPING_QUERY,tcp4_client_sock_fd);
         recv_data(&query_response,tcp4_client_sock_fd);
-        printf("QUERY RESULT: %s",query_response);
+        printf("QUERY RESULT:\n %s\n",query_response);
 
     }
     printf("Closed by User.\n");
