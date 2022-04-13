@@ -70,6 +70,7 @@ int main(int argc, const char **argv) {
 
     while (keep_running){
         sleep(1);
+        printf("\nSTILL RUNNING!\n");
     }
 
     printf("Exited by user! Bye.\n");
@@ -460,7 +461,9 @@ void* execute_sql_query_from_tcp4_client(void* client_socket){
     char *err_msg;
     while (keep_running){
         char* client_query;
-        recv_data(&client_query,client_fd);
+        if (recv_data(&client_query,client_fd)<=0){
+            break;
+        }
         printf("QUERY: %s\n",client_query);
         int rc;
         rc = sqlite3_exec(sqlite_connections[0], client_query, callback, &query_result, &err_msg);
@@ -469,7 +472,9 @@ void* execute_sql_query_from_tcp4_client(void* client_socket){
             sqlite3_free(err_msg);
         }
         //free(client_query);
-        send_data(query_result,client_fd);
+        if (send_data(query_result,client_fd)<=0){
+            break;
+        }
         //free response
         memset(query_result, 0, MAX_QUERY_RESULTS);
     }
