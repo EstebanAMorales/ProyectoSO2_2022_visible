@@ -21,8 +21,13 @@ typedef enum{
     socket_unknown = -2,
 }server_result;
 
+typedef struct thread_args {
+    int client_socket_fd;
+    int connection_index;
+}thread_args;
+
 void* execute_sql_query_from_tcp4_client(void* client_socket);
-void* read_file_from_tcp6_client(void* client_socket);
+void* execute_sql_query_from_tcp6_client(void* client_socket);
 void* read_file_from_unix_client(void* client_socket);
 void* measure_band_width_usage(void* non);
 int check(int exp, const char *msg);
@@ -53,4 +58,8 @@ static void sig_handler(int dummy);
 
 void process_exec_arguments(int arguments_count, const char **arguments);
 void print_exec_help();
+
+int get_connection_index();
+void init_mutexes();
+void destroy_mutexes();
 #endif //SO2_2022_TP1_SERVER_MULTITHREAD_H

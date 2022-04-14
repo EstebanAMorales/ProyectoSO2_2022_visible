@@ -9,8 +9,10 @@
 #include <uv.h>
 
 #include "clients_common.h"
+#include "io_ops_common.h"
 
 #define SA struct sockaddr
+#define STATEMENT_LIMIT 500
 //#define PORT 7799
 //#define INPUT_FILE_PATH "../fake180mbfile.fake"
 
@@ -21,22 +23,43 @@ char* input_file_path;
 
 int tcp6_init_client();
 int tcp6_connect_to_server(char*  server_ip);
+int prompt();
 
-
+char stmt_line[STATEMENT_LIMIT];
 int main(int argc, const char **argv){
     setup_termination_signal_catcher();
     process_exec_arguments(argc, argv);
     tcp6_init_client();
     tcp6_connect_to_server("");
     while (keep_client_running){
-        usleep(lag_between_sends_ms*1000L);
-        send_file_over_socket(input_file_path, tcp6_client_sock_fd);
+        //usleep(lag_between_sends_ms*1000L);
+        //send_file_over_socket(input_file_path, tcp6_client_sock_fd);
+        prompt();
     }
     printf("Closed by User.\n");
     close(tcp6_client_sock_fd);
     return 0;
 }
 
+int prompt(){
+    memset(stmt_line,0,STATEMENT_LIMIT);
+    printf("remote_sqlite> ");
+    if (fgets(stmt_line,STATEMENT_LIMIT,stdin)==NULL){
+        printf("Input exceeds 500 character limit.\n");
+        return -1;
+    }
+    printf("READ INPUT: %s",stmt_line);
+    if (send_data(stmt_line,tcp6_client_sock_fd)<=0){
+        return -2;
+    }
+    char* response;
+    if (recv_data(&response, tcp6_client_sock_fd)<=0){
+        return -3;
+    }
+    printf("\n%s",response);
+    free(response);
+    return 0;
+}
 
 void process_exec_arguments(int arguments_count, const char **arguments) {
     if (arguments_count < 4){
@@ -88,7 +111,7 @@ int tcp6_init_client(){
     }
     else {
         printf("Socket successfully created..\n");
-        return set_socket_timeouts(tcp6_client_sock_fd, 10);
+        return set_socket_timeouts(tcp6_client_sock_fd, 100);
         //return 0;
     }
 }

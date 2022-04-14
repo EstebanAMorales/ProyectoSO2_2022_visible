@@ -16,7 +16,7 @@
 
 #define MAX_QUERY_RESULTS 1000
 #define TCP4_SOCKET_TIMEOUT 3
-#define TCP6_SOCKET_TIMEOUT 3
+#define TCP6_SOCKET_TIMEOUT 30
 #define UNIX_SOCKET_TIMEOUT 3
 int tpc4_server_port;
 int tcp6_server_port;
@@ -46,7 +46,8 @@ struct sockaddr_un unix_client_addr;
 //------------TP2------------------;
 
 sqlite3* sqlite_connections[5];
-pthread_mutex_t queue_counters_mutex, conn1_mutex,conn2_mutex,conn3_mutex,conn4_mutex,conn5_mutex;
+pthread_mutex_t queue_sizes_mutex;
+pthread_mutex_t connection_mutexes[5];
 int connections_queue_sizes[5];
 int main(int argc, const char **argv) {
 
@@ -58,10 +59,7 @@ int main(int argc, const char **argv) {
     setup_unix_socket();
     setup_sqlite();
 
-    pthread_mutex_init(&tcp4_mutex,NULL);
-    pthread_mutex_init(&tcp6_mutex,NULL);
-    pthread_mutex_init(&unixconn_mutex,NULL);
-
+    init_mutexes();
     pthread_attr_init(&create_detached_attr);
     pthread_attr_setdetachstate(&create_detached_attr, PTHREAD_CREATE_DETACHED);
 
@@ -74,16 +72,32 @@ int main(int argc, const char **argv) {
     }
 
     printf("Exited by user! Bye.\n");
-    pthread_mutex_destroy(&tcp6_mutex);
-    pthread_mutex_destroy(&tcp4_mutex);
-    pthread_mutex_destroy(&unixconn_mutex);
+    destroy_mutexes();
+
     close(unix_listener_socket_fd);
     close(tcp4_listener_socket_fd);
     close(tcp6_listener_socket_fd);
     //fclose(bw_usage_log_file);
     return 0;
 }
-
+void destroy_mutexes(){
+    pthread_mutex_destroy(&tcp6_mutex);
+    pthread_mutex_destroy(&tcp4_mutex);
+    pthread_mutex_destroy(&unixconn_mutex);
+    pthread_mutex_destroy(&queue_sizes_mutex);
+    for (int i = 0; i < 5; ++i) {
+        pthread_mutex_destroy(&connection_mutexes[i]);
+    }
+}
+void init_mutexes(){
+    pthread_mutex_init(&tcp4_mutex,NULL);
+    pthread_mutex_init(&tcp6_mutex,NULL);
+    pthread_mutex_init(&unixconn_mutex,NULL);
+    pthread_mutex_init(&queue_sizes_mutex,NULL);
+    for (int i = 0; i < 5; ++i) {
+        pthread_mutex_init(&connection_mutexes[i],NULL);
+    }
+}
 server_result setup_sqlite(){
 
     for (int i = 0; i < 5; ++i) {
@@ -261,6 +275,20 @@ void* read_file_from_unix_client(void* client_socket){
     close(client_fd);
     return NULL;
 }
+int get_connection_index(){
+    int connection_index=0;
+    pthread_mutex_lock(&queue_sizes_mutex);
+    //find minimum
+    int minimum = connections_queue_sizes[0];
+    for (int i = 0; i < 5; ++i) {
+        if (connections_queue_sizes[i]<=minimum){
+            minimum = connections_queue_sizes[i];
+            connection_index = i;
+        }
+    }
+    pthread_mutex_unlock(&queue_sizes_mutex);
+    return connection_index;
+}
 /*
  * Handle incoming connections to the IPv6 TCP listener.
  * For each new connection creates a new detached thread.
@@ -286,9 +314,12 @@ void* tcp6_handle_new_connections(void* non){
                ntohs(tcp6_client_addr.sin6_port));
 
         pthread_t tcp6_conn_handler_thread;
-        int* pclient = malloc(sizeof(int));
-        *pclient = tcp6_client_socket_fd;
-        pthread_create(&tcp6_conn_handler_thread, &create_detached_attr, read_file_from_tcp6_client, pclient);
+
+        thread_args* params = malloc(sizeof(thread_args));
+        params->client_socket_fd=tcp6_client_socket_fd;
+        params->connection_index=get_connection_index();
+
+        pthread_create(&tcp6_conn_handler_thread, &create_detached_attr, execute_sql_query_from_tcp6_client, params);
     }
     printf("Done TCP6 listening...\n");
     return NULL;
@@ -362,6 +393,7 @@ void* tcp4_handle_new_connections(void *non) {
         pthread_t t;
         int* pclient = malloc(sizeof(int));
         *pclient = tcp4_client_socket_fd;
+
         pthread_create(&t, &create_detached_attr, execute_sql_query_from_tcp4_client, pclient);
     }
     printf("Done TCP4 listening...\n");
@@ -447,26 +479,24 @@ int callback(void *all_rows, int argc, char **argv, char **azColName) {
     strcat(all_rows,row);
     return 0;
 }
-
-/*
- * Handler function for the threads created when a IPv4 TCP connection is accepted.
- * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
- */
-void* execute_sql_query_from_tcp4_client(void* client_socket){
-    int client_fd = *((int*)client_socket);
-    free(client_socket);
+void read_client_stmt_send_result_loop(int client_fd, int connection_index){
     char query_result[MAX_QUERY_RESULTS];
-    memset(query_result, 0, MAX_QUERY_RESULTS);
-
+    //printf("QRESULT:--%s\n",query_result);
     char *err_msg;
     while (keep_running){
+        memset(query_result, 0, MAX_QUERY_RESULTS);
+        strcat(query_result,"OK!\n");
         char* client_query;
         if (recv_data(&client_query,client_fd)<=0){
             break;
         }
         printf("QUERY: %s\n",client_query);
         int rc;
-        rc = sqlite3_exec(sqlite_connections[0], client_query, callback, &query_result, &err_msg);
+
+        pthread_mutex_lock(&connection_mutexes[connection_index]);
+        rc = sqlite3_exec(sqlite_connections[connection_index], client_query, callback, &query_result, &err_msg);
+        pthread_mutex_unlock(&connection_mutexes[connection_index]);
+
         if (rc != SQLITE_OK ) {
             sprintf(query_result, "SQL error: %s\n", err_msg);
             sqlite3_free(err_msg);
@@ -476,9 +506,18 @@ void* execute_sql_query_from_tcp4_client(void* client_socket){
             break;
         }
         //free response
-        memset(query_result, 0, MAX_QUERY_RESULTS);
-    }
 
+    }
+}
+/*
+ * Handler function for the threads created when a IPv4 TCP connection is accepted.
+ * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
+ */
+void* execute_sql_query_from_tcp4_client(void* client_socket){
+    int client_fd = *((int*)client_socket);
+
+    free(client_socket);
+    read_client_stmt_send_result_loop(client_fd,0);
     printf("Constant query Thread finished execution.\n");
     close(client_fd);
     return NULL;
@@ -487,28 +526,23 @@ void* execute_sql_query_from_tcp4_client(void* client_socket){
  * Handler function for the threads created when a IPv6 TCP connection is accepted.
  * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
  */
-void* read_file_from_tcp6_client(void* client_socket){
-    int client_fd = *((int*)client_socket);
-    free(client_socket);
-    char input_buffer[BUFFER_SIZE];
-    long read_bytes = 0L;
-    printf("Starting to receive the file contents...\n");
-    while(keep_running){
-        bzero(input_buffer,BUFFER_SIZE);
-        int current_read = recv(client_fd, input_buffer, BUFFER_SIZE,0);
-        if( current_read <= 0){
-            printf("Failure to read %i bytes on file transfer. Recv result: %i\n",BUFFER_SIZE,current_read);
-            perror("Error _recv:");
-            break;
-        }
-        read_bytes += current_read;
-        //log_debug("%i bytes SAVED ON FILE.",saved_bytes);
-        pthread_mutex_lock(&tcp6_mutex);
-        tcp6_byte_count += current_read;
-        pthread_mutex_unlock(&tcp6_mutex);
-    }
-    printf("Total of %ld bytes READ.\n ",read_bytes);
-    printf("Successful file transfer.\n");
+void* execute_sql_query_from_tcp6_client(void* params){
+    thread_args* thread_data = (thread_args*)params;
+    int client_fd = thread_data->client_socket_fd;
+    int conn_idx = thread_data->connection_index;
+    printf("CLIENT_FD:%i,CONN_INDEX:%i",client_fd,conn_idx);
+    free(thread_data);
+
+    pthread_mutex_lock(&queue_sizes_mutex);
+    connections_queue_sizes[conn_idx]++;
+    pthread_mutex_unlock(&queue_sizes_mutex);
+
+    read_client_stmt_send_result_loop(client_fd,conn_idx);
+
+    pthread_mutex_lock(&queue_sizes_mutex);
+    connections_queue_sizes[conn_idx]--;
+    pthread_mutex_unlock(&queue_sizes_mutex);
+
     close(client_fd);
     return NULL;
 }
