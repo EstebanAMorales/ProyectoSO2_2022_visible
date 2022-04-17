@@ -42,7 +42,7 @@ int main(int argc , char *argv[])
         scanf("%s" , message);
 
         //Send some data
-        bytes_sent = send_data(message,sock);
+        bytes_sent = send_data(message,strlen(message),sock);
         if( bytes_sent < 0)
         {
             puts("Send failed");

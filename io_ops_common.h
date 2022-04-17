@@ -12,7 +12,7 @@ typedef enum{
     IO_SEND_ERR = -2,
 }io_result;
 int send_data_single_write(char* data_buffer, int socket_fd);
-long send_data(char* data_buffer, int socket_fd);
+long send_data(char* data_buffer, unsigned long data_size, int socket_fd);
 int recv_data_single_read(char** char_buffer, int socket_fd);
 long recv_data(char** data_buffer, int socket_fd);
 int set_socket_timeouts(int socket_fd, int seconds);

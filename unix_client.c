@@ -7,8 +7,10 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/un.h>
+#include <errno.h>
 
 #include "clients_common.h"
+#include "io_ops_common.h"
 
 #define SA struct sockaddr
 //#define INPUT_FILE_PATH "../fake180mbfile.fake"
@@ -17,23 +19,51 @@
 int unix_client_sock_fd;
 struct sockaddr_un unix_serv_addr;
 char* unix_socket_file_path;
-char* input_file_path;
+char* backup_file_path;
 
 int unix_init_client();
 int unix_connect_to_server(char*  server_ip);
 
+
+long get_database_backup(char *file_path, int client_fd);
 
 int main(int argc, const char **argv){
     setup_termination_signal_catcher();
     process_exec_arguments(argc, argv);
     unix_init_client();
     unix_connect_to_server("");
+    /*
     while (keep_client_running){
         usleep(lag_between_sends_ms*1000L);
-        send_file_over_socket(input_file_path, unix_client_sock_fd);
+
+    }
+    */
+    if (get_database_backup(backup_file_path,unix_client_sock_fd)<0L){
+        printf("Failed to get file from server\n");
     }
     printf("Closed by User.\n");
     close(unix_client_sock_fd);
+    return 0;
+}
+
+long get_database_backup(char *file_path, int client_fd) {
+    FILE* file_ptr = fopen(file_path,"wb+");
+    if (file_ptr==NULL){
+        return -1;
+    }
+    char* entire_file_container;
+    long total_read_size = recv_data(&entire_file_container,client_fd);
+    printf("TOTAL DATA RECV: %i\n",total_read_size);
+    if (total_read_size<0){
+        fclose(file_ptr);
+        free(entire_file_container);
+        return -1;
+    }
+    if (fwrite(entire_file_container,1,total_read_size,file_ptr)==0){
+        printf("Couldnt write on file. Error:%s",strerror(errno));
+    }
+    free(entire_file_container);
+    fclose(file_ptr);
     return 0;
 }
 
@@ -52,10 +82,10 @@ void process_exec_arguments(int arguments_count, const char **arguments) {
     printf("UNIX PATH: %s\n",unix_socket_file_path);
 
     const char* file_path_string_arg = arguments[2];
-    input_file_path = malloc(strlen(file_path_string_arg)*sizeof(char ));
+    backup_file_path = malloc(strlen(file_path_string_arg) * sizeof(char ));
     printf("ARG2:%s\n",file_path_string_arg);
-    strcpy(input_file_path,file_path_string_arg);
-    printf("FILE_PATH: %s\n",input_file_path);
+    strcpy(backup_file_path, file_path_string_arg);
+    printf("FILE_PATH: %s\n", backup_file_path);
 
     process_lag_argument(arguments);
 }

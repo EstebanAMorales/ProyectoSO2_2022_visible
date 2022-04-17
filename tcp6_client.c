@@ -19,7 +19,7 @@
 int tcp6_client_sock_fd;
 struct sockaddr_in6 tcp6_serv_addr;
 int port;
-char* input_file_path;
+char* backup_file_path;
 
 int tcp6_init_client();
 int tcp6_connect_to_server(char*  server_ip);
@@ -33,7 +33,7 @@ int main(int argc, const char **argv){
     tcp6_connect_to_server("");
     while (keep_client_running){
         //usleep(lag_between_sends_ms*1000L);
-        //send_file_over_socket(input_file_path, tcp6_client_sock_fd);
+        //send_file_over_socket(backup_file_path, tcp6_client_sock_fd);
         prompt();
     }
     printf("Closed by User.\n");
@@ -49,7 +49,7 @@ int prompt(){
         return -1;
     }
     printf("READ INPUT: %s",stmt_line);
-    if (send_data(stmt_line,tcp6_client_sock_fd)<=0){
+    if (send_data(stmt_line,strlen(stmt_line),tcp6_client_sock_fd)<=0){//WARNING stmt_line should not contain \0
         return -2;
     }
     char* response;
@@ -73,10 +73,10 @@ void process_exec_arguments(int arguments_count, const char **arguments) {
     printf("PORT: %i\n",port);
 
     const char* file_path_string_arg = arguments[2];
-    input_file_path = malloc(strlen(file_path_string_arg)*sizeof(char ));
+    backup_file_path = malloc(strlen(file_path_string_arg) * sizeof(char ));
     printf("ARG2:%s\n",file_path_string_arg);
-    strcpy(input_file_path,file_path_string_arg);
-    printf("FILE_PATH: %s\n",input_file_path);
+    strcpy(backup_file_path, file_path_string_arg);
+    printf("FILE_PATH: %s\n", backup_file_path);
 
     process_lag_argument(arguments);
 }

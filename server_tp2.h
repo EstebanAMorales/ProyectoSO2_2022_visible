@@ -28,7 +28,7 @@ typedef struct thread_args {
 
 void* execute_sql_query_from_tcp4_client(void* client_socket);
 void* execute_sql_query_from_tcp6_client(void* client_socket);
-void* read_file_from_unix_client(void* client_socket);
+void* send_backup_file_to_unix_client(void* params);
 void* measure_band_width_usage(void* non);
 int check(int exp, const char *msg);
 void init_bandwidth_monitor();
@@ -62,4 +62,6 @@ void print_exec_help();
 int get_connection_index();
 void init_mutexes();
 void destroy_mutexes();
+
+void vacuum_backup_database(int connection_index);
 #endif //SO2_2022_TP1_SERVER_MULTITHREAD_H

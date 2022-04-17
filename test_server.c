@@ -60,7 +60,7 @@ int main(int argc , char *argv[])
     do {
         read_size = recv_data(&recv_data_buf,client_sock);
         //Send the message back to client
-        send_data(recv_data_buf,client_sock);//(client_sock , recv_data_buf , strlen(recv_data_buf));
+        send_data(recv_data_buf,strlen(recv_data_buf),client_sock);//(client_sock , recv_data_buf , strlen(recv_data_buf));
     }
     while( read_size > 0 );
 

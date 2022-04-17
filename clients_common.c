@@ -28,6 +28,8 @@ void setup_termination_signal_catcher() {
     sigaction(SIGUSR1, &act, NULL);
     sigaction(SIGUSR2, &act, NULL);
     sigaction(SIGTSTP, &act, NULL);
+    sigaction(SIGTERM, &act, NULL);
+
 }
 
 int send_file_over_socket(char* file_name, int socket_fd){

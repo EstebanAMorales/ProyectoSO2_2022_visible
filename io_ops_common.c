@@ -65,8 +65,8 @@ unsigned  long get_amount_left_to_process(long total_data_size, long bytes_alrea
  * @param socket_fd
  * @return
  */
-long send_data(char* data_buffer, int socket_fd){
-    unsigned long total_data_size = strlen(data_buffer);
+long send_data(char* data_buffer, unsigned long data_size, int socket_fd){
+    unsigned long total_data_size = data_size;
     if (total_data_size == 0){
         return -1;
     }
@@ -108,6 +108,92 @@ long send_data(char* data_buffer, int socket_fd){
         if (bytes_written<=0){
             printf("send_data ERROR. Failure on writing loop, RESULT:%i ERROR: %s\n", bytes_written,strerror(errno));
             return 1;
+        }
+        total_bytes_sent+=bytes_written;
+
+    }
+    //printf("END OF WRITE\n");
+    return total_bytes_sent;
+}
+/**
+ * Sends an entire file through the specified socket
+ * @param filename
+ * @param socket_fd
+ * @return
+ */
+long send_file(char* filename, int socket_fd){
+    FILE* file_ptr;
+    file_ptr = fopen(filename,"rb+");
+    if (file_ptr==NULL){
+        printf("Fail to open the file. Error: %s\n",strerror(errno));
+        return -1;
+    }
+    fseek(file_ptr, 0, SEEK_END); // seek to end of file
+    long total_data_size = ftell(file_ptr);
+    fseek(file_ptr, 0, SEEK_SET); // seek back to beginning of file
+
+    if (total_data_size == 0){
+        fclose(file_ptr);
+        return -1;
+    }
+    char send_buf[IO_BUFFER_SIZE+1];//+1 for string null-termination
+    memset(send_buf,0,strlen(send_buf));//strlen can be used because send_buf is an array
+    long total_bytes_sent=0;
+    int bytes_written = 0;
+
+    set_payload_size(total_data_size, send_buf);
+
+    char* first_write_payload = &send_buf[4];
+
+
+    char* data_buffer = malloc(IO_BUFFER_SIZE);
+    memset(data_buffer,0,IO_BUFFER_SIZE);
+
+    unsigned long first_write_payload_size = 0;
+    if (total_data_size < IO_BUFFER_SIZE-4){
+        first_write_payload_size = total_data_size;
+    } else {
+        first_write_payload_size = IO_BUFFER_SIZE - 4;
+    }
+
+    unsigned long bytes_read_from_file=0L;
+    bytes_read_from_file = fread(data_buffer,1,first_write_payload_size,file_ptr);
+    if (bytes_read_from_file == 0){
+        fclose(file_ptr);
+        free(data_buffer);
+        return -1;
+    }
+
+    strncpy(first_write_payload, data_buffer, first_write_payload_size);//WARNING actual_paylaod may be not NULL-terminated.
+    //printf("send --%s--\n",data_buffer);
+
+    //send header + payload
+    bytes_written = write(socket_fd, send_buf, first_write_payload_size+4);
+    total_bytes_sent+=bytes_written;
+    if(bytes_written > 0){
+        //printf("First write return:%i\n",bytes_written);
+    } else {
+        printf("send_data ERROR. First write failed. Error: %s\n",strerror(errno));
+        fclose(file_ptr);
+        free(data_buffer);
+        return -1;
+    }
+
+    while (total_bytes_sent < total_data_size + 4){//+4 because we need to send the 4byte header
+        unsigned  long bytes_to_write;
+        bytes_to_write = get_amount_left_to_process(total_data_size,total_bytes_sent);
+        bytes_read_from_file = fread(data_buffer,1,bytes_to_write,file_ptr);
+        if (bytes_read_from_file == 0){
+            fclose(file_ptr);
+            free(data_buffer);
+            return -1;
+        }
+        bytes_written = write(socket_fd, data_buffer, bytes_to_write);
+        if (bytes_written<=0){
+            printf("send_data ERROR. Failure on writing loop, RESULT:%i ERROR: %s\n", bytes_written,strerror(errno));
+            fclose(file_ptr);
+            free(data_buffer);
+            return -1;
         }
         total_bytes_sent+=bytes_written;
 

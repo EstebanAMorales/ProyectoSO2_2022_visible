@@ -10,6 +10,7 @@
 #include <sys/un.h>
 #include <sys/select.h>
 #include <sqlite3.h>
+#include <errno.h>
 
 #include "server_tp2.h"
 #include "io_ops_common.h"
@@ -18,6 +19,7 @@
 #define TCP4_SOCKET_TIMEOUT 3
 #define TCP6_SOCKET_TIMEOUT 30
 #define UNIX_SOCKET_TIMEOUT 3
+#define BACKUP_FILENAME "./backup.db"
 int tpc4_server_port;
 int tcp6_server_port;
 char* unix_socket_path;
@@ -52,7 +54,7 @@ int connections_queue_sizes[5];
 int main(int argc, const char **argv) {
 
     process_exec_arguments(argc,argv);
-    //setup_log_file();
+
     setup_exit_signal_catcher();
     setup_tcp4_socket();
     setup_tcp6_socket();
@@ -62,12 +64,10 @@ int main(int argc, const char **argv) {
     init_mutexes();
     pthread_attr_init(&create_detached_attr);
     pthread_attr_setdetachstate(&create_detached_attr, PTHREAD_CREATE_DETACHED);
-
-    //init_bandwidth_monitor();
     init_connections_listeners();
 
     while (keep_running){
-        sleep(1);
+        sleep(2);
         printf("\nSTILL RUNNING!\n");
     }
 
@@ -77,8 +77,21 @@ int main(int argc, const char **argv) {
     close(unix_listener_socket_fd);
     close(tcp4_listener_socket_fd);
     close(tcp6_listener_socket_fd);
-    //fclose(bw_usage_log_file);
     return 0;
+}
+void vacuum_backup_database(int connection_index){
+    char *err_msg = 0;
+    char *sql_stmt = "VACUUM main INTO \"./backup.db\"";
+
+    pthread_mutex_lock(&connection_mutexes[connection_index]);
+    int sql_exec_result = sqlite3_exec(sqlite_connections[connection_index], sql_stmt, 0, 0, &err_msg);
+    pthread_mutex_unlock(&connection_mutexes[connection_index]);
+
+    if (sql_exec_result != SQLITE_OK ) {
+        fprintf(stderr, "SQL error: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        sqlite3_close(sqlite_connections[0]);
+    }
 }
 void destroy_mutexes(){
     pthread_mutex_destroy(&tcp6_mutex);
@@ -206,9 +219,10 @@ void* unix_handle_new_connections(void* non){
         }
         set_socket_timeouts(unix_client_fd, UNIX_SOCKET_TIMEOUT);
         pthread_t unix_conn_handler_thread;
-        int* pclient = malloc(sizeof(int));
-        *pclient = unix_client_fd;
-        pthread_create(&unix_conn_handler_thread, &create_detached_attr, read_file_from_unix_client, pclient);
+        thread_args* params = malloc(sizeof(thread_args));
+        params->client_socket_fd=unix_client_fd;
+        params->connection_index=get_connection_index();
+        pthread_create(&unix_conn_handler_thread, &create_detached_attr, send_backup_file_to_unix_client, params);
     }
     return NULL;
 }
@@ -250,29 +264,61 @@ int setup_unix_socket() {
  * Handler function for the threads created when a UNIX connection is accepted.
  * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
  */
-void* read_file_from_unix_client(void* client_socket){
-    int client_fd = *((int*)client_socket);
-    free(client_socket);
-    char input_buffer[BUFFER_SIZE];
-    long read_bytes = 0L;
-    printf("Starting to receive the file contents...\n");
-    while(keep_running){
-        bzero(input_buffer,BUFFER_SIZE);
-        int current_read = recv(client_fd, input_buffer, BUFFER_SIZE,0);
-        if( current_read <= 0){
-            printf("Failure to read %i bytes on file transfer. Recv result: %i\n",BUFFER_SIZE,current_read);
-            perror("Error _recv:");
-            break;
-        }
-        read_bytes += current_read;
-        //log_debug("%i bytes SAVED ON FILE.",saved_bytes);
-        pthread_mutex_lock(&unixconn_mutex);
-        unixconn_byte_count += current_read;
-        pthread_mutex_unlock(&unixconn_mutex);
+void* send_backup_file_to_unix_client(void* params){
+    thread_args* thread_data = (thread_args*)params;
+    int client_fd = thread_data->client_socket_fd;
+    int conn_idx = thread_data->connection_index;
+    printf("UNIX_CLIENT_FD:%i,CONN_INDEX:%i\n",client_fd,conn_idx);
+    free(thread_data);
+
+    pthread_mutex_lock(&queue_sizes_mutex);
+    connections_queue_sizes[conn_idx]++;
+    pthread_mutex_unlock(&queue_sizes_mutex);
+
+    vacuum_backup_database(conn_idx);
+
+    pthread_mutex_lock(&queue_sizes_mutex);
+    connections_queue_sizes[conn_idx]--;
+    pthread_mutex_unlock(&queue_sizes_mutex);
+
+    FILE* file_ptr;
+    file_ptr = fopen(BACKUP_FILENAME,"rb+");
+    if (file_ptr==NULL){
+        printf("Fail to open the file. Error: %s\n",strerror(errno));
+        return NULL;
     }
-    printf("Total of %ld bytes READ.\n ",read_bytes);
+    fseek(file_ptr, 0, SEEK_END); // seek to end of file
+    unsigned long total_data_size = ftell(file_ptr);
+    fseek(file_ptr, 0, SEEK_SET); // seek back to beginning of file
+
+    if (total_data_size == 0){
+        fclose(file_ptr);
+        return NULL;
+    }
+    printf("TOTAL FILE SIZE:%lu\n",total_data_size);
+    char* entire_file_container = malloc(total_data_size);
+    memset(entire_file_container,0,total_data_size);
+    unsigned long bytes_read_from_file=0L;
+    bytes_read_from_file = fread(entire_file_container,1,total_data_size,file_ptr);
+    printf("Bytes read from file:%lu\n",bytes_read_from_file);
+    if (bytes_read_from_file == 0){
+        if (ferror(file_ptr)){
+            printf("File read error: %s\n",strerror(errno));
+        }
+        fclose(file_ptr);
+        free(entire_file_container);
+        return NULL;
+    }
+    if (send_data(entire_file_container,total_data_size,client_fd)<0){
+        fclose(file_ptr);
+        free(entire_file_container);
+        return NULL;
+    }
+
     printf("Successful file transfer.\n");
     close(client_fd);
+    fclose(file_ptr);
+    remove(BACKUP_FILENAME);
     return NULL;
 }
 int get_connection_index(){
@@ -479,7 +525,7 @@ int callback(void *all_rows, int argc, char **argv, char **azColName) {
     strcat(all_rows,row);
     return 0;
 }
-void read_client_stmt_send_result_loop(int client_fd, int connection_index){
+void read_client_sql_send_result_loop(int client_fd, int connection_index){
     char query_result[MAX_QUERY_RESULTS];
     //printf("QRESULT:--%s\n",query_result);
     char *err_msg;
@@ -502,7 +548,7 @@ void read_client_stmt_send_result_loop(int client_fd, int connection_index){
             sqlite3_free(err_msg);
         }
         //free(client_query);
-        if (send_data(query_result,client_fd)<=0){
+        if (send_data(query_result,strlen(query_result),client_fd)<=0){//WARNING query_result should not contain \0
             break;
         }
         //free response
@@ -517,13 +563,14 @@ void* execute_sql_query_from_tcp4_client(void* client_socket){
     int client_fd = *((int*)client_socket);
 
     free(client_socket);
-    read_client_stmt_send_result_loop(client_fd,0);
+    read_client_sql_send_result_loop(client_fd, 0);
     printf("Constant query Thread finished execution.\n");
     close(client_fd);
     return NULL;
 }
 /*
  * Handler function for the threads created when a IPv6 TCP connection is accepted.
+ * The client has a prompt where the user can write any SQL statement for remote execution.
  * This will read a fixed size file from a client socket fd in chunks of size defined by the user.
  */
 void* execute_sql_query_from_tcp6_client(void* params){
@@ -537,7 +584,7 @@ void* execute_sql_query_from_tcp6_client(void* params){
     connections_queue_sizes[conn_idx]++;
     pthread_mutex_unlock(&queue_sizes_mutex);
 
-    read_client_stmt_send_result_loop(client_fd,conn_idx);
+    read_client_sql_send_result_loop(client_fd, conn_idx);
 
     pthread_mutex_lock(&queue_sizes_mutex);
     connections_queue_sizes[conn_idx]--;
@@ -545,6 +592,7 @@ void* execute_sql_query_from_tcp6_client(void* params){
 
     close(client_fd);
     return NULL;
+
 }
 /*
  * Handler function for the thread that calculates the bandwidth used by each protocol
