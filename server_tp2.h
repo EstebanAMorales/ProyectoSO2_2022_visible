@@ -64,4 +64,5 @@ void init_mutexes();
 void destroy_mutexes();
 
 void vacuum_backup_database(int connection_index);
+void close_sqlite_connections();
 #endif //SO2_2022_TP1_SERVER_MULTITHREAD_H

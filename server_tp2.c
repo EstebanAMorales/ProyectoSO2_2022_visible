@@ -77,6 +77,7 @@ int main(int argc, const char **argv) {
     close(unix_listener_socket_fd);
     close(tcp4_listener_socket_fd);
     close(tcp6_listener_socket_fd);
+    close_sqlite_connections();
     return 0;
 }
 void vacuum_backup_database(int connection_index){
@@ -114,7 +115,8 @@ void init_mutexes(){
 server_result setup_sqlite(){
 
     for (int i = 0; i < 5; ++i) {
-        int sqlite_open_result = sqlite3_open("so2_2022_tp2.db", &sqlite_connections[i]);
+        //int sqlite_open_result = sqlite3_open("so2_2022_tp2.db", &sqlite_connections[i]);
+        int sqlite_open_result = sqlite3_open_v2("so2_2022_tp2.db", &sqlite_connections[i],SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX,NULL);
         if (sqlite_open_result != SQLITE_OK) {
             fprintf(stderr, "Cannot open database: %s\n",
                     sqlite3_errmsg(sqlite_connections[i]));
@@ -139,13 +141,18 @@ server_result setup_sqlite(){
     if (sql_exec_result != SQLITE_OK ) {
         fprintf(stderr, "SQL error: %s\n", err_msg);
         sqlite3_free(err_msg);
-        sqlite3_close(sqlite_connections[0]);
+        //sqlite3_close(sqlite_connections[0]);
+        close_sqlite_connections();
         return SRV_SETUP_SQL_ERR;
     }
 
     return SRV_OK;
 }
-
+void close_sqlite_connections(){
+    for (int i = 0; i < 5; ++i) {
+        sqlite3_close(sqlite_connections[i]);
+    }
+}
 void process_exec_arguments(int arguments_count, const char **arguments) {
     if (arguments_count < 5){
         print_exec_help();
